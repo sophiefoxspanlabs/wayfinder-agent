@@ -1,0 +1,18 @@
+# Node modules
+**/node_modules
+
+# Vite cache
+**/.vite
+
+# Environment variables
+**/.env
+**/.env.local
+
+# Build folders
+**/dist
+
+# macOS
+.DS_Store
+
+# Logs
+npm-debug.log*
