@@ -28,38 +28,66 @@ export default function App() {
   const [result, setResult] = useState<AgentResult | null>(null);
   const [error, setError] = useState("");
 
-  async function runAgent() {
-    try {
-      setLoading(true);
-      setError("");
+async function runAgent() {
+  const trimmedUrl = url.trim();
+  const trimmedTask = task.trim();
 
-      const apiUrl =
-  import.meta.env.VITE_API_URL ?? "http://localhost:3001";
-
-const response = await fetch(`${apiUrl}/api/run`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          url,
-          task,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error ?? "Agent failed");
-      }
-
-      setResult(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
+  if (!trimmedUrl) {
+    setError("Please enter a website URL.");
+    return;
   }
+
+  if (!trimmedTask) {
+    setError("Please enter a task for the agent.");
+    return;
+  }
+
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(trimmedUrl);
+  } catch {
+    setError("Please enter a valid URL, such as https://example.com.");
+    return;
+  }
+
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    setError("Only HTTP and HTTPS website URLs are supported.");
+    return;
+  }
+
+  try {
+    setLoading(true);
+    setError("");
+    setResult(null);
+
+    const apiUrl =
+      import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+
+    const response = await fetch(`${apiUrl}/api/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: trimmedUrl,
+        task: trimmedTask,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error ?? "Agent failed");
+    }
+
+    setResult(data);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : "Unknown error");
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <div className="app">
