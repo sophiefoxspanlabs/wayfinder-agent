@@ -256,7 +256,7 @@ Valid JSON shapes:
       task,
       currentPage: pageState,
       availableElementIds: [...availableIds],
-      previousActions: previousActions.slice(-8),
+      previousActions: previousActions.slice(-4),
       lastError: lastError ?? null,
     },
     null,
@@ -274,6 +274,7 @@ Valid JSON shapes:
       body: JSON.stringify({
         model,
         temperature: 0,
+        max_completion_tokens: 500,
         messages: [
           {
             role: "system",

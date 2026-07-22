@@ -63,7 +63,7 @@ export async function observePage(page: Page) {
           style.visibility !== "hidden"
         );
       })
-      .slice(0, 100)
+      .slice(0, 40)
       .map((element, index) => {
         const id = `e${index + 1}`;
         element.setAttribute("data-agent-id", id);
@@ -98,7 +98,7 @@ export async function observePage(page: Page) {
       visibleText: bodyText
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, 6000),
+        .slice(0, 2500),
       elements,
       pageHasContent: bodyText.length > 20,
     };
