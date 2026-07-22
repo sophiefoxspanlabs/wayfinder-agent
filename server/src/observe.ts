@@ -1,6 +1,42 @@
 import type { Page } from "playwright";
 
 export async function observePage(page: Page) {
+  await page
+    .waitForLoadState("domcontentloaded", {
+      timeout: 10_000,
+    })
+    .catch(() => undefined);
+
+  await page
+    .locator("body")
+    .waitFor({
+      state: "attached",
+      timeout: 10_000,
+    })
+    .catch(() => undefined);
+
+  await page
+    .waitForFunction(
+      () => {
+        const body = document.body;
+
+        if (!body) {
+          return false;
+        }
+
+        const text =
+          body.innerText?.trim() ||
+          body.textContent?.trim() ||
+          "";
+
+        return text.length > 20;
+      },
+      {
+        timeout: 8_000,
+      },
+    )
+    .catch(() => undefined);
+
   return await page.evaluate(() => {
     const selectors = [
       "a",
@@ -40,20 +76,31 @@ export async function observePage(page: Page) {
             element.getAttribute("aria-label") ||
             element.getAttribute("placeholder") ||
             element.getAttribute("name") ||
+            element.getAttribute("title") ||
             "",
           type: element.getAttribute("type"),
           role: element.getAttribute("role"),
+          href:
+            element instanceof HTMLAnchorElement
+              ? element.href
+              : null,
         };
       });
 
+    const bodyText =
+      document.body?.innerText?.trim() ||
+      document.body?.textContent?.trim() ||
+      "";
+
     return {
-      title: document.title,
+      title: document.title || "Untitled page",
       url: window.location.href,
-      visibleText: document.body.innerText
+      visibleText: bodyText
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, 3000),
+        .slice(0, 6000),
       elements,
+      pageHasContent: bodyText.length > 20,
     };
   });
 }

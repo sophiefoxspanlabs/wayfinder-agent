@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
 import "./App.css";
 
 type AgentLog = {
@@ -172,10 +173,13 @@ async function runAgent() {
 
           <h2>Final Answer</h2>
 
-          <p>
-            {result?.result ??
-              "The agent response will appear here."}
-          </p>
+        <div className="markdown-output">
+          {result?.result ? (
+           <ReactMarkdown>{result.result}</ReactMarkdown>
+          ) : (
+             <p>The agent response will appear here.</p>
+          )}
+        </div>
 
         </section>
 
