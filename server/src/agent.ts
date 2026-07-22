@@ -76,7 +76,6 @@ async function executeAction(
 
       const oldUrl = page.url();
 
-      // Begin listening before clicking so navigation cannot be missed.
       const navigationPromise = page
         .waitForNavigation({
           waitUntil: "domcontentloaded",
@@ -84,7 +83,6 @@ async function executeAction(
         })
         .catch(() => null);
 
-      // Some links may open a separate page or tab.
       const popupPromise = page
         .context()
         .waitForEvent("page", {
@@ -171,12 +169,14 @@ async function executeAction(
     case "scroll": {
       await page.mouse.wheel(0, decision.amount ?? 700);
       await page.waitForTimeout(500);
+
       return page;
     }
 
     case "wait": {
       await page.waitForTimeout(1_500);
       await waitForPageContent(page);
+
       return page;
     }
 
@@ -187,6 +187,26 @@ async function executeAction(
     default:
       throw new Error(`Unsupported action: ${decision.action}`);
   }
+}
+
+function isBotChallenge(
+  title: string,
+  visibleText: string,
+): boolean {
+  const normalizedTitle = title.toLowerCase();
+  const normalizedText = visibleText.toLowerCase();
+
+  return (
+    normalizedTitle.includes("just a moment") ||
+    normalizedTitle.includes("access denied") ||
+    normalizedTitle.includes("attention required") ||
+    normalizedTitle.includes("verify you are human") ||
+    normalizedText.includes("verify you are human") ||
+    normalizedText.includes("checking your browser") ||
+    normalizedText.includes("enable javascript and cookies") ||
+    normalizedText.includes("security verification") ||
+    normalizedText.includes("captcha")
+  );
 }
 
 export async function runAgent(
@@ -230,6 +250,30 @@ export async function runAgent(
         visibleTextLength: pageState.visibleText.length,
         elementCount: pageState.elements.length,
       });
+
+      if (
+        isBotChallenge(
+          pageState.title,
+          pageState.visibleText,
+        )
+      ) {
+        return {
+          success: false,
+          result:
+            "The destination website blocked the automated browser with a security verification page. The agent successfully opened the page, but it could not access the actual content.",
+          finalUrl: page.url(),
+          logs: [
+            ...logs,
+            {
+              step,
+              action: "blocked",
+              reason:
+                "The website displayed an anti-bot or human-verification challenge.",
+              status: "error",
+            },
+          ],
+        };
+      }
 
       let decision: AgentDecision;
 
@@ -283,7 +327,8 @@ export async function runAgent(
 
         return {
           success: true,
-          result: decision.result ?? "Task completed.",
+          result:
+            decision.result ?? "Task completed.",
           finalUrl: page.url(),
           screenshot: `data:image/jpeg;base64,${screenshotBuffer.toString(
             "base64",
