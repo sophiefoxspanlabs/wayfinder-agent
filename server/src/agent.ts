@@ -251,6 +251,13 @@ export async function runAgent(
         elementCount: pageState.elements.length,
       });
 
+      console.log("Bot challenge check:", {
+        step,
+        url: pageState.url,
+        title: pageState.title,
+        textPreview: pageState.visibleText.slice(0, 500),
+    });
+
       if (
         isBotChallenge(
           pageState.title,
