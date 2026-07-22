@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { observePage } from "./observe.js";
 import {
   decideNextAction,
@@ -21,21 +21,113 @@ export interface AgentResult {
   logs: AgentLog[];
 }
 
+async function waitForPageContent(page: Page): Promise<void> {
+  await page
+    .waitForLoadState("domcontentloaded", {
+      timeout: 15_000,
+    })
+    .catch(() => undefined);
+
+  await page
+    .locator("body")
+    .waitFor({
+      state: "attached",
+      timeout: 10_000,
+    })
+    .catch(() => undefined);
+
+  await page
+    .waitForFunction(
+      () => {
+        const text =
+          document.body?.innerText?.trim() ||
+          document.body?.textContent?.trim() ||
+          "";
+
+        return text.length > 20;
+      },
+      {
+        timeout: 10_000,
+      },
+    )
+    .catch(() => undefined);
+
+  await page.waitForTimeout(750);
+}
+
 async function executeAction(
-  page: import("playwright").Page,
+  page: Page,
   decision: AgentDecision,
-): Promise<void> {
+): Promise<Page> {
   switch (decision.action) {
     case "click": {
       if (!decision.target) {
         throw new Error("Click requires a target.");
       }
 
-      await page
-        .locator(`[data-agent-id="${decision.target}"]`)
-        .click({ timeout: 10_000 });
+      const locator = page.locator(
+        `[data-agent-id="${decision.target}"]`,
+      );
 
-      break;
+      await locator.waitFor({
+        state: "visible",
+        timeout: 10_000,
+      });
+
+      const oldUrl = page.url();
+
+      // Begin listening before clicking so navigation cannot be missed.
+      const navigationPromise = page
+        .waitForNavigation({
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        })
+        .catch(() => null);
+
+      // Some links may open a separate page or tab.
+      const popupPromise = page
+        .context()
+        .waitForEvent("page", {
+          timeout: 5_000,
+        })
+        .catch(() => null);
+
+      await locator.click({
+        timeout: 10_000,
+      });
+
+      const popup = await popupPromise;
+
+      let activePage = page;
+
+      if (popup) {
+        activePage = popup;
+        await waitForPageContent(activePage);
+      } else {
+        await navigationPromise;
+
+        if (page.url() === oldUrl) {
+          await page.waitForTimeout(1_000);
+        }
+
+        await waitForPageContent(page);
+      }
+
+      const bodyText = await activePage
+        .locator("body")
+        .innerText()
+        .catch(() => "");
+
+      console.log("After click:", {
+        oldUrl,
+        currentUrl: activePage.url(),
+        title: await activePage.title().catch(() => ""),
+        textLength: bodyText.length,
+        textPreview: bodyText.slice(0, 200),
+        openedNewPage: Boolean(popup),
+      });
+
+      return activePage;
     }
 
     case "type": {
@@ -45,9 +137,11 @@ async function executeAction(
 
       await page
         .locator(`[data-agent-id="${decision.target}"]`)
-        .fill(decision.text ?? "", { timeout: 10_000 });
+        .fill(decision.text ?? "", {
+          timeout: 10_000,
+        });
 
-      break;
+      return page;
     }
 
     case "press": {
@@ -55,38 +149,44 @@ async function executeAction(
         throw new Error("Press requires a target.");
       }
 
+      const navigationPromise = page
+        .waitForNavigation({
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        })
+        .catch(() => null);
+
       await page
         .locator(`[data-agent-id="${decision.target}"]`)
-        .press(decision.key ?? "Enter", { timeout: 10_000 });
+        .press(decision.key ?? "Enter", {
+          timeout: 10_000,
+        });
 
-      break;
+      await navigationPromise;
+      await waitForPageContent(page);
+
+      return page;
     }
 
     case "scroll": {
       await page.mouse.wheel(0, decision.amount ?? 700);
-      break;
+      await page.waitForTimeout(500);
+      return page;
     }
 
     case "wait": {
-      await page.waitForTimeout(1200);
-      break;
+      await page.waitForTimeout(1_500);
+      await waitForPageContent(page);
+      return page;
     }
 
     case "finish":
     case "fail":
-      break;
+      return page;
 
     default:
       throw new Error(`Unsupported action: ${decision.action}`);
   }
-
-  await page
-    .waitForLoadState("domcontentloaded", {
-      timeout: 5000,
-    })
-    .catch(() => undefined);
-
-  await page.waitForTimeout(500);
 }
 
 export async function runAgent(
@@ -108,17 +208,28 @@ export async function runAgent(
       },
     });
 
-    const page = await context.newPage();
+    let page = await context.newPage();
 
     await page.goto(url, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
 
+    await waitForPageContent(page);
+
     let lastError: string | null = null;
+    let consecutiveAiErrors = 0;
 
     for (let step = 1; step <= 15; step++) {
       const pageState = await observePage(page);
+
+      console.log("Observed page:", {
+        step,
+        url: pageState.url,
+        title: pageState.title,
+        visibleTextLength: pageState.visibleText.length,
+        elementCount: pageState.elements.length,
+      });
 
       let decision: AgentDecision;
 
@@ -129,9 +240,15 @@ export async function runAgent(
           previousActions,
           lastError,
         });
+
+        consecutiveAiErrors = 0;
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : "Unknown AI error";
+          error instanceof Error
+            ? error.message
+            : "Unknown AI error";
+
+        consecutiveAiErrors += 1;
 
         logs.push({
           step,
@@ -142,6 +259,17 @@ export async function runAgent(
         });
 
         lastError = message;
+
+        if (consecutiveAiErrors >= 3) {
+          return {
+            success: false,
+            result:
+              "The AI returned three invalid actions in a row, so the agent stopped.",
+            finalUrl: page.url(),
+            logs,
+          };
+        }
+
         continue;
       }
 
@@ -175,7 +303,9 @@ export async function runAgent(
       if (decision.action === "fail") {
         return {
           success: false,
-          result: decision.result ?? "The task could not be completed.",
+          result:
+            decision.result ??
+            "The task could not be completed.",
           finalUrl: page.url(),
           logs: [
             ...logs,
@@ -190,7 +320,7 @@ export async function runAgent(
       }
 
       try {
-        await executeAction(page, decision);
+        page = await executeAction(page, decision);
 
         logs.push({
           step,
