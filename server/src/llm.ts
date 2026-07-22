@@ -255,8 +255,22 @@ JSON shapes:
     throw new Error("Groq returned an empty response.");
   }
 
-  const decision = validateDecision(extractJson(content));
+let decision: AgentDecision;
 
+try {
+  const parsed = extractJson(content);
+  decision = validateDecision(parsed);
+} catch (error) {
+  console.error("Invalid Groq decision:", {
+    rawContent: content,
+    error:
+      error instanceof Error
+        ? error.message
+        : String(error),
+  });
+
+  throw error;
+}
   if (decision.target && !availableIds.has(decision.target)) {
     throw new Error(
       `The model selected an element that does not exist: ${decision.target}`,
