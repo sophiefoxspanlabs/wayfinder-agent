@@ -94,21 +94,31 @@ async function executeAction(
         timeout: 10_000,
       });
 
-      const popup = await popupPromise;
+      const result = await Promise.race([
+        popupPromise.then((popup) => ({
+          type: "popup" as const,
+          popup,
+        })),
+        navigationPromise.then(() => ({
+          type: "navigation" as const,
+          popup: null,
+        })),
+        page.waitForTimeout(3_000).then(() => ({
+          type: "timeout" as const,
+          popup: null,
+        })),
+      ]);
 
       let activePage = page;
 
-      if (popup) {
-        activePage = popup;
-        await waitForPageContent(activePage);
-      } else {
-        await navigationPromise;
+      if (result.type === "popup" && result.popup) {
+        activePage = result.popup;
+      }
 
-        if (page.url() === oldUrl) {
-          await page.waitForTimeout(1_000);
-        }
+      await waitForPageContent(activePage);
 
-        await waitForPageContent(page);
+      if (activePage.url() === oldUrl) {
+        await activePage.waitForTimeout(500);
       }
 
       const bodyText = await activePage
@@ -122,7 +132,7 @@ async function executeAction(
         title: await activePage.title().catch(() => ""),
         textLength: bodyText.length,
         textPreview: bodyText.slice(0, 200),
-        openedNewPage: Boolean(popup),
+        openedNewPage: result.type === "popup",
       });
 
       return activePage;
@@ -256,7 +266,7 @@ export async function runAgent(
         url: pageState.url,
         title: pageState.title,
         textPreview: pageState.visibleText.slice(0, 500),
-    });
+      });
 
       if (
         isBotChallenge(
