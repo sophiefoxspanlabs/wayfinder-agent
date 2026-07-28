@@ -11,6 +11,7 @@ import {
   recordSuccessfulAction,
   recordVisitedPage,
 } from "./agentMemory.js";
+import { classifyTask } from "./taskClassifier.js";
 
 export interface AgentLog {
   step: number;
@@ -237,7 +238,9 @@ export async function runAgent(
   const logs: AgentLog[] = [];
   const previousActions: AgentDecision[] = [];
   const memory = createAgentMemory(task, url);
+  const classifiedTask = classifyTask(task);
 
+  console.log("Classified task:", classifiedTask);
 
   try {
     const context = await browser.newContext({
@@ -261,6 +264,39 @@ export async function runAgent(
 
     for (let step = 1; step <= 15; step++) {
       const pageState = await observePage(page);
+      if (
+  classifiedTask.type === "website_summary" &&
+  pageState.visibleText.trim().length > 40
+) {
+  const summaryText = pageState.visibleText
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 700);
+
+  const screenshotBuffer = await page.screenshot({
+    type: "jpeg",
+    quality: 60,
+  });
+
+  return {
+    success: true,
+    result: summaryText,
+    finalUrl: page.url(),
+    screenshot: `data:image/jpeg;base64,${screenshotBuffer.toString(
+      "base64",
+    )}`,
+    logs: [
+      ...logs,
+      {
+        step,
+        action: "deterministic finish",
+        reason:
+          "The task was classified as a website summary and the page already contained readable content.",
+        status: "success",
+      },
+    ],
+  };
+}
       
       recordVisitedPage(
         memory,

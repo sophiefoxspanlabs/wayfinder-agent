@@ -161,6 +161,8 @@ export async function decideNextAction({
   const systemPrompt = `
 You are a browser automation agent.
 
+Your goal is to complete the user's task in the fewest possible browser actions.
+
 Return exactly one valid JSON object and no other text.
 
 Allowed actions:
