@@ -174,13 +174,27 @@ export async function decideNextAction({
   - Every action must directly reduce missing information needed to complete the task.
 
   Return exactly one JSON object using one of these actions:
-  - click: requires target and reason
-  - type: requires target, text, and reason
-  - press: requires target, key, and reason
-  - scroll: requires reason and may include amount
-  - wait: requires reason
-  - finish: requires result and reason
-  - fail: requires result and reason
+  
+  Valid formats:
+
+  {"action":"click","target":"e1","reason":"why this click is required"}
+
+  {"action":"type","target":"e1","text":"text to enter","reason":"why typing is required"}
+
+  {"action":"press","target":"e1","key":"Enter","reason":"why pressing the key is required"}
+
+  {"action":"scroll","amount":800,"reason":"why scrolling is required"}
+
+  {"action":"wait","reason":"why waiting is required"}
+
+  {"action":"finish","result":"final answer","reason":"the requested information is available"}
+
+  {"action":"fail","result":"explanation","reason":"why the task cannot be completed"}
+
+  The action must be a string in the "action" field.
+  Do not nest the decision under an action name.
+  Scroll amount must be a number, not text.
+  Do not include markdown.
   `;
 
   const userPrompt = JSON.stringify(
