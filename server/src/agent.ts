@@ -4,6 +4,13 @@ import {
   decideNextAction,
   type AgentDecision,
 } from "./llm.js";
+import {
+  createAgentMemory,
+  getMemoryForModel,
+  recordFailedAction,
+  recordSuccessfulAction,
+  recordVisitedPage,
+} from "./agentMemory.js";
 
 export interface AgentLog {
   step: number;
@@ -229,6 +236,8 @@ export async function runAgent(
 
   const logs: AgentLog[] = [];
   const previousActions: AgentDecision[] = [];
+  const memory = createAgentMemory(task, url);
+
 
   try {
     const context = await browser.newContext({
@@ -252,6 +261,14 @@ export async function runAgent(
 
     for (let step = 1; step <= 15; step++) {
       const pageState = await observePage(page);
+      
+      recordVisitedPage(
+        memory,
+        pageState.url,
+        pageState.title,
+        pageState.visibleText,
+      );
+
 
       console.log("Observed page:", {
         step,
@@ -299,6 +316,7 @@ export async function runAgent(
           task,
           pageState,
           previousActions,
+          memory: getMemoryForModel(memory),
           lastError,
         });
 
@@ -383,6 +401,8 @@ export async function runAgent(
 
       try {
         page = await executeAction(page, decision);
+       
+        recordSuccessfulAction(memory, decision);
 
         logs.push({
           step,
@@ -397,6 +417,9 @@ export async function runAgent(
           error instanceof Error
             ? error.message
             : "Unknown browser error";
+        
+        recordFailedAction(memory, decision, message);
+
 
         logs.push({
           step,
