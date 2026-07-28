@@ -152,8 +152,10 @@ export async function decideNextAction({
     throw new Error("GROQ_API_KEY is missing from server/.env.");
   }
 
+  const limitedElements = pageState.elements.slice(0, 15);
+
   const availableIds = new Set(
-    pageState.elements.map((element) => element.id),
+    limitedElements.map((element) => element.id),
   );
 
   const systemPrompt = `
@@ -185,7 +187,10 @@ Rules:
   const userPrompt = JSON.stringify(
     {
       task,
-      currentPage: pageState,
+      currentPage: {
+       ...pageState,
+       elements: limitedElements,
+      },
       availableElementIds: [...availableIds],
       previousActions: previousActions.slice(-4),
       lastError: lastError ?? null,
@@ -224,17 +229,45 @@ Rules:
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
+  const errorText = await response.text();
 
-    console.error("Groq request failed:", {
-      status: response.status,
-      body: errorText,
-    });
+  console.error("Groq request failed:", {
+    status: response.status,
+    body: errorText,
+  });
 
-    throw new Error(
-      `Groq request failed (${response.status}): ${errorText}`,
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = Number(retryAfterHeader ?? 20);
+
+    const waitMilliseconds =
+      (Number.isFinite(retryAfterSeconds)
+        ? retryAfterSeconds
+        : 20) *
+        1000 +
+      500;
+
+    console.log(
+      `Groq rate limit reached. Waiting ${waitMilliseconds}ms before retrying.`,
     );
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, waitMilliseconds),
+    );
+
+    return decideNextAction({
+      task,
+      pageState,
+      previousActions,
+      memory,
+      lastError,
+    });
   }
+
+  throw new Error(
+    `Groq request failed (${response.status}): ${errorText}`,
+  );
+}
 
   const data = (await response.json()) as {
     choices?: Array<{
