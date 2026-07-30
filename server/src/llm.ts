@@ -184,7 +184,7 @@ export async function decideNextAction({
 }: DecideNextActionInput): Promise<AgentDecision> {
   const apiKey = process.env.GROQ_API_KEY;
   const model =
-    process.env.GROQ_MODEL ?? "openai/gpt-oss-20b";
+    process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-20b";
 
   if (!apiKey) {
     throw new Error("GROQ_API_KEY is missing from server/.env.");
@@ -237,7 +237,56 @@ export async function decideNextAction({
           },
         ],
         response_format: {
-          type: "json_object",
+          type: "json_schema",
+          json_schema: {
+            name: "agent_decision",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                action: {
+                  type: "string",
+                  enum: [
+                    "click",
+                    "type",
+                    "press",
+                    "scroll",
+                    "wait",
+                    "finish",
+                    "fail",
+                  ],
+                },
+                reason: {
+                  type: "string",
+                },
+                target: {
+                  type: ["string", "null"],
+                },
+                text: {
+                  type: ["string", "null"],
+                },
+                key: {
+                  type: ["string", "null"],
+                },
+                amount: {
+                  type: ["number", "null"],
+                },
+                result: {
+                  type: ["string", "null"],
+                },
+              },
+              required: [
+                "action",
+                "reason",
+                "target",
+                "text",
+                "key",
+                "amount",
+                "result",
+              ],
+              additionalProperties: false,
+            },
+          },
         },
       }),
     },
@@ -299,7 +348,7 @@ export async function decideNextAction({
       };
     };
   };
-  
+
   const promptTokens = data.usage?.prompt_tokens ?? 0;
   const cachedTokens =
     data.usage?.prompt_tokens_details?.cached_tokens ?? 0;
