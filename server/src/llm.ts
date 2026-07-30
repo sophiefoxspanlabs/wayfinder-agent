@@ -19,13 +19,13 @@ interface PageState {
 export interface AgentDecision {
   reason: string;
   action:
-    | "click"
-    | "type"
-    | "press"
-    | "scroll"
-    | "wait"
-    | "finish"
-    | "fail";
+  | "click"
+  | "type"
+  | "press"
+  | "scroll"
+  | "wait"
+  | "finish"
+  | "fail";
   target?: string;
   text?: string;
   key?: string;
@@ -37,9 +37,46 @@ interface DecideNextActionInput {
   task: string;
   pageState: PageState;
   previousActions: AgentDecision[];
-    memory: MemoryForModel;
+  memory: MemoryForModel;
   lastError?: string | null;
 }
+const STATIC_AGENT_PROMPT = `
+You are a browser agent.
+
+Your job is to complete the user's task using the fewest necessary actions.
+
+Decision process:
+- First determine whether the task can be completed from the current page state.
+- If the requested information is already visible, use "finish".
+- Only click, type, or scroll when the current page is missing information required for the task.
+- Do not navigate merely to gather more context.
+- Do not open an item when the user only asked to identify, list, compare, summarize, or extract visible information.
+- Preserve the page's current meaning, ordering, filters, and context unless the user explicitly asks to change them.
+- Every action must directly reduce missing information needed to complete the task.
+
+Return exactly one JSON object using one of these actions:
+
+Valid formats:
+
+{"action":"click","target":"e1","reason":"why this click is required"}
+
+{"action":"type","target":"e1","text":"text to enter","reason":"why typing is required"}
+
+{"action":"press","target":"e1","key":"Enter","reason":"why pressing the key is required"}
+
+{"action":"scroll","amount":800,"reason":"why scrolling is required"}
+
+{"action":"wait","reason":"why waiting is required"}
+
+{"action":"finish","result":"final answer","reason":"the requested information is available"}
+
+{"action":"fail","result":"explanation","reason":"why the task cannot be completed"}
+
+The action must be a string in the "action" field.
+Do not nest the decision under an action name.
+Scroll amount must be a number, not text.
+Do not include markdown.
+`;
 
 function extractJson(content: string): unknown {
   const cleaned = content
@@ -157,63 +194,25 @@ export async function decideNextAction({
 
   const availableIds = new Set(
     limitedElements.map((element) => element.id),
-  );
-
-  const systemPrompt = `
-  You are a browser agent.
-
-  Your job is to complete the user's task using the fewest necessary actions.
-
-  Decision process:
-  - First determine whether the task can be completed from the current page state.
-  - If the requested information is already visible, use "finish".
-  - Only click, type, or scroll when the current page is missing information required for the task.
-  - Do not navigate merely to gather more context.
-  - Do not open an item when the user only asked to identify, list, compare, summarize, or extract visible information.
-  - Preserve the page's current meaning, ordering, filters, and context unless the user explicitly asks to change them.
-  - Every action must directly reduce missing information needed to complete the task.
-
-  Return exactly one JSON object using one of these actions:
-  
-  Valid formats:
-
-  {"action":"click","target":"e1","reason":"why this click is required"}
-
-  {"action":"type","target":"e1","text":"text to enter","reason":"why typing is required"}
-
-  {"action":"press","target":"e1","key":"Enter","reason":"why pressing the key is required"}
-
-  {"action":"scroll","amount":800,"reason":"why scrolling is required"}
-
-  {"action":"wait","reason":"why waiting is required"}
-
-  {"action":"finish","result":"final answer","reason":"the requested information is available"}
-
-  {"action":"fail","result":"explanation","reason":"why the task cannot be completed"}
-
-  The action must be a string in the "action" field.
-  Do not nest the decision under an action name.
-  Scroll amount must be a number, not text.
-  Do not include markdown.
-  `;
+  )
 
   const userPrompt = JSON.stringify(
-  {
-    task,
-    currentPage: {
-      title: pageState.title,
-      url: pageState.url,
-      visibleText: pageState.visibleText,
-      elements: limitedElements,
+    {
+      task,
+      currentPage: {
+        title: pageState.title,
+        url: pageState.url,
+        visibleText: pageState.visibleText,
+        elements: limitedElements,
+      },
+      availableElementIds: [...availableIds],
+      memory,
+      previousActions: previousActions.slice(-4),
+      lastError: lastError ?? null,
     },
-    availableElementIds: [...availableIds],
-    memory,
-    previousActions: previousActions.slice(-4),
-    lastError: lastError ?? null,
-  },
-  null,
-  2,
-);
+    null,
+    2,
+  );
 
   const response = await fetch(
     "https://api.groq.com/openai/v1/chat/completions",
@@ -230,7 +229,7 @@ export async function decideNextAction({
         messages: [
           {
             role: "system",
-            content: systemPrompt,
+            content: STATIC_AGENT_PROMPT,
           },
           {
             role: "user",
@@ -245,45 +244,45 @@ export async function decideNextAction({
   );
 
   if (!response.ok) {
-  const errorText = await response.text();
+    const errorText = await response.text();
 
-  console.error("Groq request failed:", {
-    status: response.status,
-    body: errorText,
-  });
-
-  if (response.status === 429) {
-    const retryAfterHeader = response.headers.get("retry-after");
-    const retryAfterSeconds = Number(retryAfterHeader ?? 20);
-
-    const waitMilliseconds =
-      (Number.isFinite(retryAfterSeconds)
-        ? retryAfterSeconds
-        : 20) *
-        1000 +
-      500;
-
-    console.log(
-      `Groq rate limit reached. Waiting ${waitMilliseconds}ms before retrying.`,
-    );
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, waitMilliseconds),
-    );
-
-    return decideNextAction({
-      task,
-      pageState,
-      previousActions,
-      memory,
-      lastError,
+    console.error("Groq request failed:", {
+      status: response.status,
+      body: errorText,
     });
-  }
 
-  throw new Error(
-    `Groq request failed (${response.status}): ${errorText}`,
-  );
-}
+    if (response.status === 429) {
+      const retryAfterHeader = response.headers.get("retry-after");
+      const retryAfterSeconds = Number(retryAfterHeader ?? 20);
+
+      const waitMilliseconds =
+        (Number.isFinite(retryAfterSeconds)
+          ? retryAfterSeconds
+          : 20) *
+        1000 +
+        500;
+
+      console.log(
+        `Groq rate limit reached. Waiting ${waitMilliseconds}ms before retrying.`,
+      );
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, waitMilliseconds),
+      );
+
+      return decideNextAction({
+        task,
+        pageState,
+        previousActions,
+        memory,
+        lastError,
+      });
+    }
+
+    throw new Error(
+      `Groq request failed (${response.status}): ${errorText}`,
+    );
+  }
 
   const data = (await response.json()) as {
     choices?: Array<{
@@ -291,7 +290,33 @@ export async function decideNextAction({
         content?: string;
       };
     }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      prompt_tokens_details?: {
+        cached_tokens?: number;
+      };
+    };
   };
+  
+  const promptTokens = data.usage?.prompt_tokens ?? 0;
+  const cachedTokens =
+    data.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+
+  const cacheHitRate =
+    promptTokens > 0
+      ? ((cachedTokens / promptTokens) * 100).toFixed(1)
+      : "0.0";
+
+  console.log("Groq prompt cache:", {
+    model,
+    promptTokens,
+    cachedTokens,
+    cacheHitRate: `${cacheHitRate}%`,
+    completionTokens: data.usage?.completion_tokens ?? 0,
+    totalTokens: data.usage?.total_tokens ?? 0,
+  });
 
   const content = data.choices?.[0]?.message?.content;
 
