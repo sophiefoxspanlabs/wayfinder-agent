@@ -240,7 +240,7 @@ export async function decideNextAction({
           type: "json_schema",
           json_schema: {
             name: "agent_decision",
-            strict: true,
+            strict: false,
             schema: {
               type: "object",
               properties: {
