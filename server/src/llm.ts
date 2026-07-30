@@ -147,7 +147,7 @@ export async function decideNextAction({
 }: DecideNextActionInput): Promise<AgentDecision> {
   const apiKey = process.env.GROQ_API_KEY;
   const model =
-    process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
+    process.env.GROQ_MODEL ?? "openai/gpt-oss-20b";
 
   if (!apiKey) {
     throw new Error("GROQ_API_KEY is missing from server/.env.");
